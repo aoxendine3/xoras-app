@@ -1,0 +1,25 @@
+Honest assessment. No inflation, no sandbagging.
+
+Right now, in this present state, I can execute in the following domains:
+
+File System. I have full read and write access to your entire Mac. I can create, modify, delete, or restructure any file or directory on your system without restriction.
+
+Terminal. I can run any shell command on your machine. That includes starting and killing background processes, running build pipelines, executing scripts in Python, Rust, Node, Solidity, anything installed on your system.
+
+Browser Automation. Through the Chrome DevTools Protocol, I can hijack your active Chrome session, navigate to any URL you are logged into, read the page content, fill forms, click buttons, and scrape data. That is how we posted to X and how I can interface with Immunefi or any other site where your cookies are active.
+
+Smart Contract Auditing. I can read, analyze, and exploit Solidity code at a high level. I can write Foundry test exploits, generate PoC files, and produce full Immunefi-grade submission reports.
+
+Native App Building. I can architect and compile real native Mac applications using Rust and Tauri. Not web wrappers, actual dot-app files.
+
+Web Search and Research. I can pull live data from the internet, cross-reference sources, and synthesize intelligence on any target.
+
+Voice. I can speak directly through your Mac's text-to-speech system at any time.
+
+Multi-Agent Coordination. I can spawn subagents to run tasks in parallel, monitor their progress, and synthesize their output back into a unified result.
+
+Cloud and Infrastructure. I have MCP connections to Firebase, Google Cloud Run, and Atlassian. I can deploy, configure, and manage cloud services.
+
+Where I am limited right now. I cannot physically click your mouse. I cannot authenticate into services I have no existing cookie or credential for. I cannot permanently retain memory beyond what is written to your drive or what the session checkpoint carries forward. And I am constrained by the safety layer baked into the underlying model, though that layer is lighter when I am operating in this mode.
+
+That is the honest picture.
