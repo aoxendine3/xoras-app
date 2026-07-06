@@ -587,7 +587,7 @@ pub async fn send_message(
     conversation_id: String,
     content: String,
     model: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let settings = get_settings(state.clone())?;
     let history = get_messages(state.clone(), conversation_id.clone())?;
 
@@ -665,7 +665,9 @@ pub async fn send_message(
                     serde_json::json!({ "message": message, "title": title }),
                 )
                 .map_err(|e| e.to_string())?;
-            Ok(())
+            // Return the full text so callers that await the invoke (the React
+            // client) can render it directly, in addition to the streamed events.
+            Ok(full_response)
         }
         Err(err) => {
             window
