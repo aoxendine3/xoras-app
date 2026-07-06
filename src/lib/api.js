@@ -22,6 +22,16 @@ export const api = {
   refreshModels: () => invoke("refresh_models"),
 
   sendMessage: (conversationId, content, model) => invoke("send_message", { conversationId, content, model }),
+
+  /* ─── Persona Council ─── */
+  listPersonas: () => invoke("list_personas"),
+  createPersona: (name, title, systemPrompt, model, temperature) =>
+    invoke("create_persona", { name, title, systemPrompt, model: model || null, temperature: temperature ?? null }),
+  updatePersona: (id, { name, title, systemPrompt, model, temperature, enabled }) =>
+    invoke("update_persona", { id, name, title, systemPrompt, model: model || null, temperature, enabled }),
+  setPersonaEnabled: (id, enabled) => invoke("set_persona_enabled", { id, enabled }),
+  deletePersona: (id) => invoke("delete_persona", { id }),
+  deliberate: (conversationId, content, model) => invoke("deliberate", { conversationId, content, model }),
 };
 
 /* ─── System ─── */

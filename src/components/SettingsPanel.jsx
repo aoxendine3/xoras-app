@@ -3,8 +3,8 @@ import { useApp } from "../context/AppContext";
 import { api } from "../lib/api";
 
 export default function SettingsPanel() {
-  const { state, dispatch, refreshModels } = useApp();
-  const { settings } = state;
+  const { state, dispatch, refreshModels, togglePersona } = useApp();
+  const { settings, personas } = state;
   const [form, setForm] = useState({
     username: settings.username || "",
     gemini_api_key: settings.gemini_api_key || "",
@@ -112,6 +112,45 @@ export default function SettingsPanel() {
                   placeholder="AIza…" />
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Persona Council */}
+        <div className="section-card">
+          <div className="section-card-header">
+            <span style={{ color: "var(--accent-2)" }}>◈</span>
+            <span className="section-card-title">Persona Council</span>
+            <span className="tag green" style={{ marginLeft: "auto" }}>
+              {personas.filter(p => p.enabled).length}/{personas.length} active
+            </span>
+          </div>
+          <div className="section-card-body">
+            <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
+              In Council mode, each enabled persona reasons from its own perspective, then a
+              synthesizer funnels them into one answer. Toggle who sits at the table.
+            </p>
+            {personas.length === 0 && (
+              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>No personas seeded yet.</div>
+            )}
+            {personas.map(p => (
+              <div key={p.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border)" }}>
+                <input
+                  type="checkbox"
+                  checked={p.enabled}
+                  onChange={e => togglePersona(p.id, e.target.checked)}
+                  style={{ width: 15, height: 15, accentColor: "var(--accent-2)", cursor: "pointer", marginTop: 3 }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+                    {p.name} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>— {p.title}</span>
+                    <span style={{ marginLeft: 8, fontSize: 10, color: "var(--text-muted)" }}>temp {p.temperature}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
+                    {p.system_prompt.length > 160 ? p.system_prompt.slice(0, 160) + "…" : p.system_prompt}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

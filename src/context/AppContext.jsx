@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, useEffect, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api, sys } from "../lib/api";
 
 const AppContext = createContext(null);
@@ -24,6 +25,11 @@ const initialState = {
   selectedModel: "ollama::llama3",
   modelStatus: { ollama_online: false, lmstudio_online: false, ollama_count: 0, lmstudio_count: 0 },
   openModelSelector: false,
+
+  // Persona council
+  councilMode: false,
+  personas: [],
+  council: { active: false, roster: [], voices: [], synthesizing: false },
 
   // Settings
   settings: {},
@@ -59,6 +65,14 @@ function reducer(state, action) {
     case "SET_SELECTED_MODEL": return { ...state, selectedModel: action.payload };
     case "OPEN_MODEL_SELECTOR":  return { ...state, openModelSelector: true };
     case "CLOSE_MODEL_SELECTOR": return { ...state, openModelSelector: false };
+    case "SET_COUNCIL_MODE": return { ...state, councilMode: action.payload };
+    case "SET_PERSONAS":     return { ...state, personas: action.payload };
+    case "COUNCIL_START":    return { ...state, council: { active: true, roster: action.payload, voices: [], synthesizing: false } };
+    case "COUNCIL_VOICE":    return state.council.voices.some(v => v.name === action.payload.name)
+                              ? state
+                              : { ...state, council: { ...state.council, voices: [...state.council.voices, action.payload] } };
+    case "COUNCIL_SYNTHESIZING": return { ...state, council: { ...state.council, synthesizing: true } };
+    case "COUNCIL_RESET":    return { ...state, council: { active: false, roster: [], voices: [], synthesizing: false } };
     case "SET_SETTINGS":     return { ...state, settings: action.payload };
     case "SET_METRICS":      return { ...state, metrics: action.payload };
     case "SET_DOJO_ERRORS":  return { ...state, dojoErrors: action.payload };
@@ -101,6 +115,12 @@ export function AppProvider({ children }) {
           }
         }
 
+        // Load persona council
+        try {
+          const personas = await api.listPersonas();
+          dispatch({ type: "SET_PERSONAS", payload: personas });
+        } catch (_) {}
+
         // Load dojo errors
         try {
           const errors = await sys.getDojoErrors();
@@ -113,6 +133,28 @@ export function AppProvider({ children }) {
         dispatch({ type: "SET_LOADING", payload: false });
       }
     })();
+  }, []);
+
+  // ── Council deliberation events (from the Rust `deliberate` command) ──
+  // Note: React StrictMode mounts effects twice in dev. `listen` is async, so we
+  // guard with a `cancelled` flag and tear down any subscription that resolves
+  // after cleanup — otherwise we'd register duplicate listeners and every voice
+  // would arrive twice.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisteners = [];
+    (async () => {
+      try {
+        const subs = await Promise.all([
+          listen("council-start", (e) => dispatch({ type: "COUNCIL_START", payload: e.payload?.personas || [] })),
+          listen("council-voice", (e) => dispatch({ type: "COUNCIL_VOICE", payload: e.payload })),
+          listen("council-synthesizing", () => dispatch({ type: "COUNCIL_SYNTHESIZING" })),
+        ]);
+        if (cancelled) { subs.forEach(u => { try { u(); } catch (_) {} }); return; }
+        unlisteners = subs;
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; unlisteners.forEach(u => { try { u(); } catch (_) {} }); };
   }, []);
 
   // ── Metrics polling ──
@@ -191,9 +233,12 @@ export function AppProvider({ children }) {
     dispatch({ type: "SET_STREAMING", payload: true });
     dispatch({ type: "RESET_STREAM" });
     dispatch({ type: "SET_ERROR", payload: null });
+    if (state.councilMode) dispatch({ type: "COUNCIL_RESET" });
 
     try {
-      const response = await api.sendMessage(state.activeConversationId, content, state.selectedModel);
+      const response = state.councilMode
+        ? await api.deliberate(state.activeConversationId, content, state.selectedModel)
+        : await api.sendMessage(state.activeConversationId, content, state.selectedModel);
       dispatch({ type: "SET_STREAMING", payload: false });
       const assistantMsg = {
         id: crypto.randomUUID(),
@@ -206,9 +251,40 @@ export function AppProvider({ children }) {
       await refreshConversations();
     } catch (e) {
       dispatch({ type: "SET_STREAMING", payload: false });
+      dispatch({ type: "COUNCIL_RESET" });
       dispatch({ type: "SET_ERROR", payload: String(e) });
     }
-  }, [state.activeConversationId, state.streaming, state.selectedModel, refreshConversations]);
+  }, [state.activeConversationId, state.streaming, state.selectedModel, state.councilMode, refreshConversations]);
+
+  // ── Council / persona actions ──
+  const setCouncilMode = useCallback((on) => {
+    dispatch({ type: "SET_COUNCIL_MODE", payload: on });
+  }, []);
+
+  const refreshPersonas = useCallback(async () => {
+    const personas = await api.listPersonas();
+    dispatch({ type: "SET_PERSONAS", payload: personas });
+  }, []);
+
+  const togglePersona = useCallback(async (id, enabled) => {
+    await api.setPersonaEnabled(id, enabled);
+    await refreshPersonas();
+  }, [refreshPersonas]);
+
+  const savePersona = useCallback(async (id, fields) => {
+    await api.updatePersona(id, fields);
+    await refreshPersonas();
+  }, [refreshPersonas]);
+
+  const addPersona = useCallback(async (name, title, systemPrompt, temperature) => {
+    await api.createPersona(name, title, systemPrompt, null, temperature);
+    await refreshPersonas();
+  }, [refreshPersonas]);
+
+  const removePersona = useCallback(async (id) => {
+    await api.deletePersona(id);
+    await refreshPersonas();
+  }, [refreshPersonas]);
 
   const runTerminalCommand = useCallback(async (command) => {
     dispatch({ type: "ADD_TERMINAL_LINE", payload: { type: "cmd", text: `$ ${command}` } });
@@ -245,6 +321,12 @@ export function AppProvider({ children }) {
     sendMessage,
     runTerminalCommand,
     speak,
+    setCouncilMode,
+    refreshPersonas,
+    togglePersona,
+    savePersona,
+    addPersona,
+    removePersona,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

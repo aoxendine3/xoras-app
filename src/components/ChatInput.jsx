@@ -2,6 +2,13 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useApp } from "../context/AppContext";
 import { SLASH_COMMANDS } from "../lib/constants";
 
+const UsersIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+
 // ── Icons (inline SVG for zero-dep) ──
 const SendIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -23,6 +30,9 @@ const PlusIcon = () => (
 );
 
 export default function ChatInput({ onSend, disabled, models, selectedModel, onModelChange, onRefreshModels, localOnly, modelStatus, onSlashCommand, openModelSelector, onModelSelectorOpened }) {
+  const { state, setCouncilMode } = useApp();
+  const councilMode = state.councilMode;
+  const enabledPersonas = state.personas.filter(p => p.enabled).length;
   const [value, setValue] = useState("");
   const [showSlash, setShowSlash] = useState(false);
   const [filteredCmds, setFilteredCmds] = useState(SLASH_COMMANDS);
@@ -183,8 +193,22 @@ export default function ChatInput({ onSend, disabled, models, selectedModel, onM
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
+          <button
+            className="model-pill"
+            onClick={() => setCouncilMode(!councilMode)}
+            title="Council mode: every persona deliberates in parallel, then a synthesizer funnels them into one answer"
+            style={{
+              borderColor: councilMode ? "var(--accent-2)" : "var(--border)",
+              color: councilMode ? "var(--accent-2)" : "var(--text-secondary)",
+            }}
+          >
+            <UsersIcon />
+            Council {councilMode ? `· ${enabledPersonas}` : "off"}
+          </button>
           <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
-            Enter to send · Shift+Enter for newline · Hold mic for voice
+            {councilMode
+              ? `${enabledPersonas} minds deliberate, then funnel to one`
+              : "Enter to send · Shift+Enter for newline · Hold mic for voice"}
           </span>
         </div>
       </div>

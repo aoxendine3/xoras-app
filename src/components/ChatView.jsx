@@ -47,6 +47,65 @@ function MessageBubble({ message, streaming }) {
   );
 }
 
+// ── Council deliberation panel: shows each persona's voice, then the funnel ──
+function CouncilPanel({ council }) {
+  const { roster, voices, synthesizing } = council;
+  const pending = Math.max(0, (roster?.length || 0) - (voices?.length || 0));
+
+  return (
+    <div style={{
+      border: "1px solid rgba(122,162,255,0.25)",
+      background: "rgba(122,162,255,0.05)",
+      borderRadius: "var(--r-md)",
+      padding: "12px 14px",
+      marginBottom: 14,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--accent-2)" }}>
+          ◈ Council convening
+        </span>
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          {roster?.length || 0} minds · {voices?.length || 0} spoken{pending > 0 ? ` · ${pending} thinking…` : ""}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: voices?.length ? 12 : 0 }}>
+        {(roster || []).map((p, i) => {
+          const done = voices?.some(v => v.name === p.name);
+          return (
+            <span key={i} style={{
+              fontSize: 11, padding: "2px 8px", borderRadius: 999,
+              border: "1px solid var(--border)",
+              color: done ? "var(--text-primary)" : "var(--text-muted)",
+              background: done ? "rgba(122,162,255,0.12)" : "transparent",
+            }}>
+              {done ? "●" : "○"} {p.name}
+            </span>
+          );
+        })}
+      </div>
+
+      {(voices || []).map((v, i) => (
+        <div key={i} style={{ padding: "8px 0", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: v.ok ? "var(--accent)" : "var(--red)" }}>
+            {v.name} <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>— {v.title}</span>
+          </div>
+          <div style={{ fontSize: 13, color: v.ok ? "var(--text-secondary)" : "var(--text-muted)", marginTop: 2, fontStyle: v.ok ? "normal" : "italic" }}>
+            {v.content}
+          </div>
+        </div>
+      ))}
+
+      {synthesizing && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, color: "var(--accent-2)", fontSize: 12, fontWeight: 600 }}>
+          <span>▼ Funneling {voices?.length || 0} perspectives into one…</span>
+          <div className="loading-dots"><div className="loading-dot" /><div className="loading-dot" /><div className="loading-dot" /></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Sparkles icon ──
 const SparklesIcon = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -72,6 +131,7 @@ export default function ChatView() {
     activeConversationId, activeProjectId,
     models, modelStatus, selectedModel, settings,
     error, projects, openModelSelector,
+    councilMode, council,
   } = state;
 
   const scrollRef = useRef(null);
@@ -180,14 +240,20 @@ export default function ChatView() {
             <MessageBubble key={msg.id} message={msg} />
           ))}
 
-          {streaming && (
+          {/* Council deliberation (funnel of personas) */}
+          {(council.active || council.voices.length > 0) && (
+            <CouncilPanel council={council} />
+          )}
+
+          {/* Single-voice streaming (only when not in council mode) */}
+          {!councilMode && streaming && (
             <MessageBubble
               message={{ role: "assistant", content: streamContent }}
               streaming
             />
           )}
 
-          {streaming && !streamContent && (
+          {!councilMode && streaming && !streamContent && (
             <div className="message-bubble">
               <div className="message-role assistant">
                 <span className="message-role-dot assistant" />
