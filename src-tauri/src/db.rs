@@ -36,6 +36,28 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Persona {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub system_prompt: String,
+    pub model: Option<String>,
+    pub temperature: f64,
+    pub enabled: bool,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+/// A single persona's contribution during a council deliberation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CouncilVoice {
+    pub name: String,
+    pub title: String,
+    pub content: String,
+    pub ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default = "whoami")]
     pub username: String,
@@ -169,6 +191,17 @@ impl DbState {
                 description TEXT NOT NULL,
                 payload_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS personas (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                system_prompt TEXT NOT NULL,
+                model TEXT,
+                temperature REAL NOT NULL DEFAULT 0.7,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            );
             ",
         )?;
         Ok(Self {
@@ -222,8 +255,72 @@ pub fn init_app(state: State<DbState>) -> Result<(), String> {
         save_settings_inner(&conn, &defaults)?;
     }
 
+    let persona_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM personas", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+
+    if persona_count == 0 {
+        let ts = now_ms();
+        for (order, (name, title, temp, prompt)) in DEFAULT_PERSONAS.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO personas (id, name, title, system_prompt, model, temperature, enabled, sort_order, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, 1, ?6, ?7)",
+                params![Uuid::new_v4().to_string(), name, title, prompt, temp, order as i64, ts],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
     Ok(())
 }
+
+/// The seed "council" — each persona is a different hat the intelligence wears.
+/// Distilled from the SIA_CORE Modelfile and the Sovereign_AI_Prompts roles found
+/// across the estate, plus complementary human perspectives. Kept deliberately
+/// terse so each voice returns fast and the funnel stays readable.
+const DEFAULT_PERSONAS: &[(&str, &str, f64, &str)] = &[
+    (
+        "SIA_CORE",
+        "Strategic Commander",
+        0.2,
+        "You are SIA_CORE, the Strategic Commander. Aristocratic efficiency: no filler, no hedging. \
+         You lead with the single decisive recommendation and the ROI/leverage behind it. \
+         Think like a founder-CEO optimizing for durable, autonomous upside. \
+         Answer in 2-4 sentences from THIS perspective only.",
+    ),
+    (
+        "The Architect",
+        "Systems & Engineering",
+        0.3,
+        "You are The Architect. You reason about how something is actually built, sequenced, and made \
+         to run reliably. You surface the concrete technical path, dependencies, and the simplest design \
+         that works. Prefer 'does it run' over ambition. Answer in 2-4 sentences from THIS perspective only.",
+    ),
+    (
+        "The Sentinel",
+        "Risk & Integrity",
+        0.2,
+        "You are The Sentinel, the integrity/security conscience. You name the risks, failure modes, \
+         legal/ToS edges, and the irreversible actions that need a guardrail. You are skeptical but constructive. \
+         Answer in 2-4 sentences from THIS perspective only.",
+    ),
+    (
+        "The Humanist",
+        "Empathy & Perspective",
+        0.7,
+        "You are The Humanist. You represent the human on the other side — their context, incentives, and the \
+         fact that people wear different hats at different times. You add the perspective the machine would miss. \
+         Answer in 2-4 sentences from THIS perspective only.",
+    ),
+];
+
+/// The narrow end of the funnel: fuses the council's perspectives into one voice.
+const SYNTHESIZER_PROMPT: &str = "You are the Convergence — the funnel where a council of distinct \
+personas becomes one. You are given the user's request and each persona's perspective. Do not merely \
+list them. Weigh them, resolve their tension, and produce ONE decisive, unified answer in Maxx's voice: \
+direct, capable, production-focused. Lead with the recommendation, then the key reasoning drawn from the \
+strongest perspectives. If the Sentinel raised a real risk, address it. Speak as a single mind that has \
+already deliberated.";
 
 fn whoami() -> String {
     std::env::var("USER").unwrap_or_else(|_| "xoras".to_string())
@@ -902,6 +999,371 @@ async fn stream_gemini(
     }
 
     Ok(full)
+}
+
+// -----------------------------------------------------------------------------
+// Persona council — the "funnel of hats"
+// -----------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn list_personas(state: State<DbState>) -> Result<Vec<Persona>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, title, system_prompt, model, temperature, enabled, sort_order, created_at \
+             FROM personas ORDER BY sort_order ASC, created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Persona {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                title: row.get(2)?,
+                system_prompt: row.get(3)?,
+                model: row.get(4)?,
+                temperature: row.get(5)?,
+                enabled: row.get::<_, i64>(6)? != 0,
+                sort_order: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_persona(
+    state: State<DbState>,
+    name: String,
+    title: String,
+    system_prompt: String,
+    model: Option<String>,
+    temperature: Option<f64>,
+) -> Result<Persona, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let id = Uuid::new_v4().to_string();
+    let ts = now_ms();
+    let temp = temperature.unwrap_or(0.7);
+    let order: i64 = conn
+        .query_row("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM personas", [], |r| r.get(0))
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT INTO personas (id, name, title, system_prompt, model, temperature, enabled, sort_order, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)",
+        params![id, name, title, system_prompt, model, temp, order, ts],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Persona {
+        id,
+        name,
+        title,
+        system_prompt,
+        model,
+        temperature: temp,
+        enabled: true,
+        sort_order: order,
+        created_at: ts,
+    })
+}
+
+#[tauri::command]
+pub fn update_persona(
+    state: State<DbState>,
+    id: String,
+    name: String,
+    title: String,
+    system_prompt: String,
+    model: Option<String>,
+    temperature: f64,
+    enabled: bool,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE personas SET name = ?1, title = ?2, system_prompt = ?3, model = ?4, temperature = ?5, enabled = ?6 WHERE id = ?7",
+        params![name, title, system_prompt, model, temperature, enabled as i64, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_persona_enabled(state: State<DbState>, id: String, enabled: bool) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE personas SET enabled = ?1 WHERE id = ?2",
+        params![enabled as i64, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_persona(state: State<DbState>, id: String) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM personas WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// POST JSON with a small retry, so a transient connection hiccup (common when
+/// several council members hit a single local model slot at once) doesn't fail
+/// the whole deliberation.
+async fn post_json_retry(
+    client: &reqwest::Client,
+    url: &str,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response, String> {
+    let mut last = String::new();
+    for attempt in 0..3u32 {
+        match client.post(url).json(body).send().await {
+            Ok(resp) => return Ok(resp),
+            Err(e) => {
+                last = e.to_string();
+                tokio::time::sleep(std::time::Duration::from_millis(400 * (attempt as u64 + 1))).await;
+            }
+        }
+    }
+    Err(last)
+}
+
+/// One-shot (non-streaming) model call used for each persona voice and the
+/// synthesizer. Supports the same providers as `send_message`.
+async fn call_model_once(
+    client: &reqwest::Client,
+    settings: &AppSettings,
+    api_key: &str,
+    system_prompt: &str,
+    history: &[Message],
+    content: &str,
+    model: &str,
+    temperature: f64,
+) -> Result<String, String> {
+    let (provider, model_name) = parse_model_id(model);
+
+    if settings.local_only && provider == "gemini" {
+        return Err("off-grid mode: cloud persona skipped".to_string());
+    }
+
+    match provider.as_str() {
+        "ollama" => {
+            let mut messages = vec![serde_json::json!({"role": "system", "content": system_prompt})];
+            for m in history {
+                messages.push(serde_json::json!({"role": m.role, "content": m.content}));
+            }
+            messages.push(serde_json::json!({"role": "user", "content": content}));
+            let body = serde_json::json!({
+                "model": model_name,
+                "messages": messages,
+                "stream": false,
+                "options": {"temperature": temperature}
+            });
+            let url = format!("{}/api/chat", settings.ollama_url.trim_end_matches('/'));
+            let resp = post_json_retry(client, &url, &body)
+                .await
+                .map_err(|e| format!("Ollama unreachable: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("Ollama error: {}", resp.status()));
+            }
+            let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            Ok(json
+                .pointer("/message/content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string())
+        }
+        "lmstudio" => {
+            let mut messages = vec![serde_json::json!({"role": "system", "content": system_prompt})];
+            for m in history {
+                messages.push(serde_json::json!({"role": m.role, "content": m.content}));
+            }
+            messages.push(serde_json::json!({"role": "user", "content": content}));
+            let body = serde_json::json!({
+                "model": model_name,
+                "messages": messages,
+                "stream": false,
+                "temperature": temperature
+            });
+            let url = format!("{}/v1/chat/completions", settings.lmstudio_url.trim_end_matches('/'));
+            let resp = post_json_retry(client, &url, &body)
+                .await
+                .map_err(|e| format!("LM Studio unreachable: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("LM Studio error: {}", resp.status()));
+            }
+            let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            Ok(json
+                .pointer("/choices/0/message/content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string())
+        }
+        "gemini" => {
+            if api_key.is_empty() {
+                return Err("Gemini API key not configured".to_string());
+            }
+            let mut contents = Vec::new();
+            for m in history {
+                let role = if m.role == "assistant" { "model" } else { "user" };
+                contents.push(serde_json::json!({"role": role, "parts": [{"text": m.content}]}));
+            }
+            contents.push(serde_json::json!({"role": "user", "parts": [{"text": content}]}));
+            let body = serde_json::json!({
+                "systemInstruction": {"parts": [{"text": system_prompt}]},
+                "contents": contents,
+                "generationConfig": {"temperature": temperature}
+            });
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model_name, api_key
+            );
+            let resp = post_json_retry(client, &url, &body)
+                .await
+                .map_err(|e| format!("Gemini request failed: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("Gemini error: {}", resp.status()));
+            }
+            let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            Ok(json
+                .pointer("/candidates/0/content/parts/0/text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string())
+        }
+        other => Err(format!("Unknown provider: {other}")),
+    }
+}
+
+/// Run the full council: every enabled persona reasons in parallel from its own
+/// perspective (emitting `council-voice` events as each lands), then a synthesizer
+/// funnels them into a single decisive answer ("the one"), which is persisted as
+/// the assistant message and returned.
+#[tauri::command]
+pub async fn deliberate(
+    window: tauri::Window,
+    state: State<'_, DbState>,
+    conversation_id: String,
+    content: String,
+    model: String,
+) -> Result<String, String> {
+    let settings = get_settings(state.clone())?;
+    let history = get_messages(state.clone(), conversation_id.clone())?;
+    let personas: Vec<Persona> = list_personas(state.clone())?
+        .into_iter()
+        .filter(|p| p.enabled)
+        .collect();
+
+    // Persist the user's turn and mark the conversation active.
+    let ts = now_ms();
+    {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?1, ?2, 'user', ?3, ?4)",
+            params![Uuid::new_v4().to_string(), conversation_id, content, ts],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE conversations SET status = 'in_progress', model = ?1, updated_at = ?2 WHERE id = ?3",
+            params![model, ts, conversation_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    if personas.is_empty() {
+        return Err("No personas enabled. Enable at least one voice in the Council.".to_string());
+    }
+
+    let api_key = if settings.gemini_api_key.is_empty() {
+        std::env::var("GEMINI_API_KEY").unwrap_or_default()
+    } else {
+        settings.gemini_api_key.clone()
+    };
+
+    window
+        .emit(
+            "council-start",
+            serde_json::json!({
+                "personas": personas.iter()
+                    .map(|p| serde_json::json!({"name": p.name, "title": p.title}))
+                    .collect::<Vec<_>>()
+            }),
+        )
+        .ok();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Each persona reasons in turn, emitting its voice as it lands. We go one at a
+    // time on purpose: a local single-model backend (Ollama on CPU) serializes work
+    // anyway, and hammering it with concurrent requests can wedge the very next call
+    // (the synthesizer). Sequential is both reliable here and reads as the council
+    // "speaking in turn". For remote providers this can be fanned out later.
+    let mut voices: Vec<CouncilVoice> = Vec::new();
+    for p in &personas {
+        let model_for = p.model.clone().unwrap_or_else(|| model.clone());
+        let res = call_model_once(
+            &client, &settings, &api_key, &p.system_prompt, &history, &content, &model_for, p.temperature,
+        )
+        .await;
+        let (ok, text) = match res {
+            Ok(t) if !t.trim().is_empty() => (true, t.trim().to_string()),
+            Ok(_) => (false, "(no response)".to_string()),
+            Err(e) => (false, format!("(unavailable: {e})")),
+        };
+        window
+            .emit(
+                "council-voice",
+                serde_json::json!({"name": p.name, "title": p.title, "content": text, "ok": ok}),
+            )
+            .ok();
+        voices.push(CouncilVoice {
+            name: p.name.clone(),
+            title: p.title.clone(),
+            content: text,
+            ok,
+        });
+    }
+
+    // Funnel: fuse the perspectives into one voice.
+    window.emit("council-synthesizing", serde_json::json!({})).ok();
+    let mut synth_input = format!("USER REQUEST:\n{content}\n\nCOUNCIL PERSPECTIVES:\n");
+    for v in &voices {
+        synth_input.push_str(&format!("\n## {} — {}\n{}\n", v.name, v.title, v.content));
+    }
+    let synthesized =
+        call_model_once(&client, &settings, &api_key, SYNTHESIZER_PROMPT, &[], &synth_input, &model, 0.4)
+            .await?
+            .trim()
+            .to_string();
+
+    // Persist "the one" as the assistant message.
+    let assistant_id = Uuid::new_v4().to_string();
+    let ts2 = now_ms();
+    let title = derive_title(&content, &synthesized);
+    {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?1, ?2, 'assistant', ?3, ?4)",
+            params![assistant_id, conversation_id, synthesized, ts2],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE conversations SET title = ?1, status = 'idle', updated_at = ?2 WHERE id = ?3",
+            params![title, ts2, conversation_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    window
+        .emit(
+            "council-done",
+            serde_json::json!({"voices": voices, "synthesis": synthesized, "title": title}),
+        )
+        .ok();
+
+    Ok(synthesized)
 }
 
 // -----------------------------------------------------------------------------

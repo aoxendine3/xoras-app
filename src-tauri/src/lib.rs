@@ -43,6 +43,13 @@ pub fn run() {
             db::list_models,
             db::refresh_models,
             db::send_message,
+            // persona council
+            db::list_personas,
+            db::create_persona,
+            db::update_persona,
+            db::set_persona_enabled,
+            db::delete_persona,
+            db::deliberate,
             // monitor control commands
             monitor::monitor_start,
             monitor::monitor_stop,
