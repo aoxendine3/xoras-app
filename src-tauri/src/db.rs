@@ -53,6 +53,14 @@ pub struct AppSettings {
     pub default_model: String,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default = "default_true")]
+    pub show_ollama_alert: bool,
+    #[serde(default = "default_true")]
+    pub developer_mode: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_ollama_url() -> String {
@@ -82,6 +90,8 @@ impl Default for AppSettings {
             local_only: false,
             default_model: "ollama::llama3.2".to_string(),
             theme: "light".to_string(),
+            show_ollama_alert: true,
+            developer_mode: true,
         }
     }
 }
