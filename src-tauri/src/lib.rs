@@ -4,12 +4,20 @@ mod sys;
 mod db;
 mod monitor;
 mod anomaly;
+mod sandbox;
 
 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize the SQLite-backed application state before the app starts so that
+    // commands and the background monitor (which reads `State<DbState>`) can access it.
+    let db_state = db::DbState::new(db::db_path()).expect("failed to initialize database");
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
+        .manage(db_state)
         // Register all Tauri commands used by the app
         .invoke_handler(tauri::generate_handler![
             // sys commands
@@ -22,6 +30,8 @@ pub fn run() {
             sys::get_dojo_errors,
             // db commands
             db::init_app,
+            db::get_settings,
+            db::save_settings,
             db::list_projects,
             db::create_project,
             db::delete_project,

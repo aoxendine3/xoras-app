@@ -4,6 +4,10 @@ use std::process::Command;
 use sysinfo::System;
 use tauri::AppHandle;
 use tauri::Manager;
+use tauri::State;
+
+use crate::db;
+use crate::sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemMetrics {
@@ -125,8 +129,16 @@ pub fn speak(text: String) -> Result<(), String> {
 }
 
 /// Execute a shell command synchronously and return stdout/stderr/exit code.
+///
+/// When Developer mode is disabled (see Settings), the command is validated against a
+/// conservative allow-list first; disallowed commands are rejected without executing.
 #[tauri::command]
-pub fn run_shell(command: String) -> Result<ShellResult, String> {
+pub fn run_shell(state: State<db::DbState>, command: String) -> Result<ShellResult, String> {
+    let settings = db::get_settings(state)?;
+    if !settings.developer_mode {
+        sandbox::is_allowed(&command)?;
+    }
+
     let output = Command::new("zsh")
         .args(["-c", &command])
         .output()
