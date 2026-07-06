@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use sysinfo::System;
+use sysinfo::{Disks, System};
 use tauri::AppHandle;
 use tauri::Manager;
 
@@ -76,30 +76,27 @@ pub fn get_system_metrics() -> Result<SystemMetrics, String> {
     let ram_used_gb = ram_used / 1_073_741_824.0;
     let ram_percent = if ram_total > 0.0 { (ram_used / ram_total) * 100.0 } else { 0.0 };
 
-    // Use `df` for macOS APFS accuracy — sysinfo disk stats can mismatch on APFS volumes
-    let df_output = Command::new("df")
-        .args(["-k", "/System/Volumes/Data"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    // Disk stats via sysinfo so this works cross-platform (macOS/Linux/Windows).
+    // Prefer the volume mounted at the filesystem root; otherwise fall back to
+    // the largest disk so the dashboard always shows a meaningful figure.
+    const GB: f64 = 1_073_741_824.0;
+    let disks = Disks::new_with_refreshed_list();
+    let root = if cfg!(windows) { "C:\\" } else { "/" };
+    let chosen = disks
+        .iter()
+        .find(|d| d.mount_point().to_string_lossy() == root)
+        .or_else(|| disks.iter().max_by_key(|d| d.total_space()));
 
-    let df_str = String::from_utf8_lossy(&df_output.stdout);
-    let mut disk_total_gb = 0.0f64;
-    let mut disk_used_gb = 0.0f64;
-    let mut disk_available_gb = 0.0f64;
-    let mut disk_percent = 0.0f64;
-
-    for line in df_str.lines().skip(1) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 4 {
-            let total_kb: f64 = parts[1].parse().unwrap_or(0.0);
-            let used_kb: f64 = parts[2].parse().unwrap_or(0.0);
-            let avail_kb: f64 = parts[3].parse().unwrap_or(0.0);
-            disk_total_gb = total_kb / 1_048_576.0;
-            disk_used_gb = used_kb / 1_048_576.0;
-            disk_available_gb = avail_kb / 1_048_576.0;
-            disk_percent = if total_kb > 0.0 { (used_kb / total_kb) * 100.0 } else { 0.0 };
-        }
-        break;
+    let (mut disk_total_gb, mut disk_used_gb, mut disk_available_gb, mut disk_percent) =
+        (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    if let Some(disk) = chosen {
+        let total = disk.total_space() as f64;
+        let avail = disk.available_space() as f64;
+        let used = (total - avail).max(0.0);
+        disk_total_gb = total / GB;
+        disk_available_gb = avail / GB;
+        disk_used_gb = used / GB;
+        disk_percent = if total > 0.0 { (used / total) * 100.0 } else { 0.0 };
     }
 
     Ok(SystemMetrics {
@@ -114,23 +111,49 @@ pub fn get_system_metrics() -> Result<SystemMetrics, String> {
     })
 }
 
-/// Speak text using the OS TTS (macOS `say`). Non-blocking.
+/// Speak text using the OS TTS. Non-blocking and best-effort: uses macOS `say`,
+/// and on Linux falls back to whichever of `spd-say`/`espeak-ng`/`espeak` exists.
+/// A missing TTS engine is not treated as an error so callers never break.
 #[tauri::command]
 pub fn speak(text: String) -> Result<(), String> {
-    Command::new("say")
-        .arg(&text)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        &["say"]
+    } else if cfg!(windows) {
+        // PowerShell speech synthesizer handled separately below.
+        &[]
+    } else {
+        &["spd-say", "espeak-ng", "espeak"]
+    };
+
+    for bin in candidates {
+        if Command::new(bin).arg(&text).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let script = format!(
+            "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{}')",
+            text.replace('\'', "''")
+        );
+        let _ = Command::new("powershell").args(["-Command", &script]).spawn();
+    }
+
+    // No TTS engine available — silently succeed rather than surfacing an error.
     Ok(())
 }
 
 /// Execute a shell command synchronously and return stdout/stderr/exit code.
+/// Uses the platform's default shell (`cmd` on Windows, `sh` elsewhere).
 #[tauri::command]
 pub fn run_shell(command: String) -> Result<ShellResult, String> {
-    let output = Command::new("zsh")
-        .args(["-c", &command])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = if cfg!(windows) {
+        Command::new("cmd").args(["/C", &command]).output()
+    } else {
+        Command::new("sh").args(["-c", &command]).output()
+    }
+    .map_err(|e| e.to_string())?;
 
     Ok(ShellResult {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
