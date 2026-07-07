@@ -1,10 +1,10 @@
 # Xoras
 
-Your personal agent command center for macOS — built to match the Google Antigravity 2.0 chat interface, wired to your own projects and models.
+Your personal agent command center for macOS — Xoras.app 2.0 chat interface, wired to your own projects and models.
 
 ## Features
 
-- Antigravity-style layout: projects sidebar, conversation threads, slash commands
+- Friendly user layout: projects sidebar, conversation threads, slash commands
 - Streaming chat via **Gemini** (cloud) or **Ollama** (local)
 - SQLite persistence for projects, conversations, and messages
 - Native macOS app via Tauri 2
