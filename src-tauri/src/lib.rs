@@ -9,7 +9,14 @@ mod anomaly;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Open (or create) the SQLite-backed application state and register it so
+    // every `#[tauri::command]` that takes `State<DbState>` can resolve it.
+    // Without this, the first `init_app` invoke panics with
+    // "state() called before manage() for ...DbState".
+    let db_state = db::DbState::new(db::db_path()).expect("failed to open Xoras database");
+
     tauri::Builder::default()
+        .manage(db_state)
         // Register all Tauri commands used by the app
         .invoke_handler(tauri::generate_handler![
             // sys commands
@@ -22,6 +29,8 @@ pub fn run() {
             sys::get_dojo_errors,
             // db commands
             db::init_app,
+            db::get_settings,
+            db::save_settings,
             db::list_projects,
             db::create_project,
             db::delete_project,
