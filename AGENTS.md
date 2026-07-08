@@ -34,6 +34,17 @@ monitoring. Standard scripts live in `package.json` (`dev`, `build`, `tauri:dev`
   Ollama ever segfaults on model load again, verify those variants are still disabled.
 - In the app's chat **model pill**, select the exact pulled tag (e.g. `llama3.2:1b`). The
   default `ollama::llama3.2` in settings won't match a `:1b` pull and will error.
+- **Keep Ollama at its default single slot on CPU.** Do NOT raise `OLLAMA_NUM_PARALLEL`
+  here — on this CPU-only VM it splits threads/context across slots and makes each
+  generation many times slower, which can time out the Council synthesizer. The Council
+  runs its personas sequentially for exactly this reason.
+
+### Persona Council (chat feature)
+- Chat has a **Council** toggle. When on, `deliberate` runs every enabled persona in turn
+  (each emits a `council-voice` Tauri event), then a synthesizer funnels them into one
+  answer. Personas are DB rows (table `personas`, seeded on first `init_app`) and are
+  managed in **Settings → Persona Council**. With the small local model a full council
+  takes ~30-120s; be patient and send only once.
 
 ### Data & conventions
 - App data + SQLite DB live at `~/.local/share/Xoras/xoras.db` (created/seeded on first
