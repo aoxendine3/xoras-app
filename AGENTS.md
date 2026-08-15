@@ -2,41 +2,43 @@
 
 ## Cursor Cloud specific instructions
 
-### What this is
-Xoras is a **Tauri 2 desktop app** (an AI chat "command center").
-- **Frontend:** React 19 + Vite (dev server on port `1420`). Source in `src/`.
-- **Backend:** Rust (`src-tauri/`) exposing Tauri commands for SQLite persistence
-  (`db.rs`), system metrics/shell/file access (`sys.rs`), and background
-  monitoring/anomaly detection (`monitor.rs`, `anomaly.rs`).
+Xoras is a **Tauri 2 desktop app**: a React + Vite frontend (`src/`, `index.html`) and a
+Rust backend (`src-tauri/`) that owns SQLite persistence, model routing, and system
+monitoring. Standard scripts live in `package.json` (`dev`, `build`, `tauri:dev`,
+`tauri:build`) and `README.md` — use those; only the non-obvious caveats are below.
 
-### Running / building (standard commands live in `package.json`)
-- Full desktop app (dev): `npm run tauri:dev` — this runs Vite, compiles the Rust
-  backend, and launches the native GUI window. A display is required; on the cloud
-  VM use `DISPLAY=:1`.
-- Frontend only: `npm run dev` (UI on `1420`) — note the Tauri `invoke` calls only
-  work inside the desktop app, not a plain browser.
-- Frontend production build check: `npm run build`.
-- Rust type/build check: `cargo build` (or `cargo check`) run from `src-tauri/`.
-- There is no configured linter or automated test suite in this repo.
+### Services & how to run them
+- **Full desktop app (primary):** `npm run tauri:dev`. This runs Vite *and* launches the
+  native window, so don't start `npm run dev` separately at the same time.
+  - A GUI is required. Use the provided X display: `export DISPLAY=:1`.
+  - In this VM's software-rendered WebKit, export `WEBKIT_DISABLE_COMPOSITING_MODE=1`
+    (and `LIBGL_ALWAYS_SOFTWARE=1`) before launching, or the window may render blank.
+- **Frontend only (no Rust backend):** `npm run dev` serves on `http://localhost:1420`.
+  Note: every data/system feature goes through Tauri `invoke`, which does **not** exist in a
+  plain browser — a browser tab will render the shell but projects/chat/metrics stay empty.
+  Real functionality must be tested through the native `tauri:dev` window.
+- **Builds:** frontend `npm run build`; backend `cargo build` (run in `src-tauri/`).
+  `tauri:build` bundles a `.dmg`/`.app` and is macOS-only — do not expect it to work here.
 
-### Non-obvious caveats (important)
-- **Rust toolchain:** the backend depends (transitively, via `toml_datetime`) on
-  crates requiring `edition2024`, so it needs a recent stable Rust (≈1.85+). The
-  cloud VM's default toolchain has been set to `stable` via rustup; if a build
-  fails with "feature `edition2024` is required", run `rustup default stable`.
-- **macOS-targeted code runs degraded on Linux (expected):** `sys::speak` shells out
-  to macOS `say`, `sys::run_shell` uses `zsh`, and `sys::get_system_metrics` reads the
-  macOS path `/System/Volumes/Data` for disk stats. On Linux these specific features
-  error or report `0` for disk, but the app still runs and CPU/RAM metrics are correct.
-- `libEGL ... DRI3` warnings at startup are harmless (software rendering fallback).
-- **Chat needs an LLM backend:** sending a message calls Ollama
-  (`http://127.0.0.1:11434`), LM Studio, or Gemini (needs `GEMINI_API_KEY`). With none
-  running, the message is still saved to SQLite but you get an expected
-  "Ollama unreachable" / "Gemini API key not configured" error banner.
-- SQLite DB lives at the OS data dir (`~/.local/share/Xoras/xoras.db` on Linux). It is
-  created on first launch; projects/conversations/messages persist across restarts.
+### Toolchain
+- Requires **Rust stable ≥ 1.85** (deps use edition 2024). The default toolchain is already
+  set to `stable`; `cargo build` in `src-tauri/` fetches crates on first run (~1 min).
 
-### Repo notes
-- The root also contains `cdp_*.py` and `speech.txt` — browser-automation scripts
-  unrelated to building/running the Xoras app. They are not part of the app and are
-  not needed (or run) for development.
+### Local LLM (Ollama) — needed for live chat
+- Chat routes to Ollama/LM Studio/Gemini. For local testing, Ollama is installed but there is
+  **no systemd** here, so start it manually: `ollama serve` (leave it running), then
+  `ollama pull llama3.2:1b`.
+- **Gotcha:** the stock `llama-server` picks an AMX / AVX512-BF16 CPU variant that
+  **segfaults** under this VM. The higher-ISA ggml variants have been moved to
+  `/usr/local/lib/ollama/_disabled/` so it falls back to the stable AVX2 (`haswell`) path. If
+  Ollama ever segfaults on model load again, verify those variants are still disabled.
+- In the app's chat **model pill**, select the exact pulled tag (e.g. `llama3.2:1b`). The
+  default `ollama::llama3.2` in settings won't match a `:1b` pull and will error.
+
+### Data & conventions
+- App data + SQLite DB live at `~/.local/share/Xoras/xoras.db` (created/seeded on first
+  `init_app`, which also inserts a default "Xoras" project + conversation).
+- There is **no automated test suite** and **no lint config** in this repo; "checking" means
+  `npm run build` + `cargo build` + a manual run of `tauri:dev`.
+- The backend was originally macOS-only (`df /System/Volumes/Data`, `say`, `zsh`); system
+  metrics/shell/TTS are now cross-platform, so the app runs on Linux.

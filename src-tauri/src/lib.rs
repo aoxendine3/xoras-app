@@ -10,9 +10,11 @@ mod sandbox;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize the SQLite-backed application state before the app starts so that
-    // commands and the background monitor (which reads `State<DbState>`) can access it.
-    let db_state = db::DbState::new(db::db_path()).expect("failed to initialize database");
+    // Open (or create) the SQLite-backed application state and register it so
+    // every `#[tauri::command]` that takes `State<DbState>` can resolve it.
+    // Without this, the first `init_app` invoke panics with
+    // "state() called before manage() for ...DbState".
+    let db_state = db::DbState::new(db::db_path()).expect("failed to open Xoras database");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
