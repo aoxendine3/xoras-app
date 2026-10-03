@@ -4,6 +4,7 @@ mod sys;
 mod db;
 mod monitor;
 mod anomaly;
+mod sandbox;
 
 
 
@@ -16,6 +17,8 @@ pub fn run() {
     let db_state = db::DbState::new(db::db_path()).expect("failed to open Xoras database");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(db_state)
         // Register all Tauri commands used by the app
         .invoke_handler(tauri::generate_handler![

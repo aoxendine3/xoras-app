@@ -13,6 +13,8 @@ export default function SettingsPanel() {
     default_model: settings.default_model || "ollama::llama3",
     local_only: settings.local_only || false,
     theme: settings.theme || "dark",
+    show_ollama_alert: settings.show_ollama_alert !== false,
+    developer_mode: settings.developer_mode !== false,
   });
   const [saved, setSaved] = useState("");
 
@@ -110,6 +112,34 @@ export default function SettingsPanel() {
                   value={form.gemini_api_key}
                   onChange={e => update("gemini_api_key", e.target.value)}
                   placeholder="AIza…" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* System */}
+        <div className="section-card">
+          <div className="section-card-header">
+            <span style={{ color: "var(--accent)" }}>⚙</span>
+            <span className="section-card-title">System</span>
+          </div>
+          <div className="section-card-body">
+            <div className="settings-group">
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <input type="checkbox" id="show_ollama_alert" checked={form.show_ollama_alert}
+                  onChange={e => update("show_ollama_alert", e.target.checked)}
+                  style={{ width: 15, height: 15, accentColor: "var(--accent)", cursor: "pointer" }} />
+                <label htmlFor="show_ollama_alert" className="field-label" style={{ cursor: "pointer" }}>
+                  Show Ollama health alert in the top bar
+                </label>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <input type="checkbox" id="developer_mode" checked={form.developer_mode}
+                  onChange={e => update("developer_mode", e.target.checked)}
+                  style={{ width: 15, height: 15, accentColor: "var(--accent)", cursor: "pointer" }} />
+                <label htmlFor="developer_mode" className="field-label" style={{ cursor: "pointer" }}>
+                  Developer mode (unrestricted Terminal — off = commands limited to a safe allow-list)
+                </label>
               </div>
             </div>
           </div>

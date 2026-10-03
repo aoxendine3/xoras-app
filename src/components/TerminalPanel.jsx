@@ -6,7 +6,8 @@ const HOME = "/Users/ajoxendine68";
 
 export default function TerminalPanel() {
   const { state, dispatch, runTerminalCommand } = useApp();
-  const { terminalLines } = state;
+  const { terminalLines, settings } = state;
+  const devMode = settings?.developer_mode !== false;
   const [input, setInput] = useState("");
   const [history, setHistory] = useState([]);
   const [histIdx, setHistIdx] = useState(-1);
@@ -95,6 +96,12 @@ export default function TerminalPanel() {
           </button>
         </div>
       </div>
+
+      {!devMode && (
+        <div className="terminal-line info" style={{ padding: "6px 12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>
+          Developer mode is off — commands are limited to a safe allow-list (ls, pwd, git, ollama, …). Enable it in Settings for an unrestricted console.
+        </div>
+      )}
 
       <div className="terminal-output" ref={outputRef} onClick={() => inputRef.current?.focus()}>
         {terminalLines.map((line, i) => (

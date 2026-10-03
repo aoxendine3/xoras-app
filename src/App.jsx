@@ -22,8 +22,9 @@ const PANEL_TITLES = {
 
 function TopBar() {
   const { state } = useApp();
-  const { view, modelStatus, metrics } = state;
+  const { view, modelStatus, metrics, settings } = state;
   const ollamaOnline = modelStatus?.ollama_online;
+  const showOllamaAlert = settings?.show_ollama_alert !== false;
 
   return (
     <div className="topbar">
@@ -42,12 +43,14 @@ function TopBar() {
         </div>
       )}
 
-      <div className="status-indicator">
-        <span className={`status-dot ${ollamaOnline ? "online" : "offline"}`} />
-        <span style={{ fontSize: 11 }}>
-          {ollamaOnline ? "Ollama" : "Ollama offline"}
-        </span>
-      </div>
+      {showOllamaAlert && (
+        <div className="status-indicator">
+          <span className={`status-dot ${ollamaOnline ? "online" : "offline"}`} />
+          <span style={{ fontSize: 11 }}>
+            {ollamaOnline ? "Ollama" : "Ollama offline"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
